@@ -1,7 +1,7 @@
 import type { ReturnData } from "./return-data";
+import type { RunBlockResult } from "./vm/vm-adapter";
 
 import { Block } from "@nomicfoundation/ethereumjs-block";
-import { RunBlockResult } from "@nomicfoundation/ethereumjs-vm";
 
 import { HARDHAT_MEMPOOL_SUPPORTED_ORDERS } from "../../constants";
 import { BuildInfo, HardhatNetworkChainsConfig } from "../../../types";

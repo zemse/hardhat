@@ -1,37 +1,16 @@
-name: hardhat-network-helpers CI
-
-on:
-  push:
-    branches: [$default-branch]
-    paths:
-      - "packages/hardhat-network-helpers/**"
-      - "packages/hardhat-common/**"
-      - "config/**"
-  pull_request:
-    branches:
-      - "**"
-    paths:
-      - "packages/hardhat-network-helpers/**"
-      - "packages/hardhat-common/**"
-      - "config/**"
-
-defaults:
-  run:
-    working-directory: packages/hardhat-network-helpers
-
 concurrency:
   group: ${{github.workflow}}-${{github.ref}}
   cancel-in-progress: true
 
 jobs:
   test_on_windows:
-    name: Test hardhat-network-helpers on Windows with Node 14
+    name: Test hardhat-network-helpers on Windows with Node 18
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v2
       - uses: actions/setup-node@v2
         with:
-          node-version: 14
+          node-version: 18.15
           cache: yarn
       - name: Install
         run: yarn --frozen-lockfile
@@ -43,7 +22,7 @@ jobs:
         run: yarn test
 
   test_on_macos:
-    name: Test hardhat-network-helpers on MacOS with Node 14
+    name: Test hardhat-network-helpers on MacOS with Node 18
     runs-on: macos-latest
     # disable until actions/virtual-environments#4896 is fixed
     if: ${{ false }}
@@ -51,7 +30,7 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions/setup-node@v2
         with:
-          node-version: 14
+          node-version: 18.15
           cache: yarn
       - name: Install
         run: yarn --frozen-lockfile
@@ -67,7 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node: [14, 16, 18.15]
+        node: [18.15]
     steps:
       - uses: actions/checkout@v2
       - uses: actions/setup-node@v2

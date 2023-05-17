@@ -1,3 +1,4 @@
+import { Block } from "@nomicfoundation/ethereumjs-block";
 import { Common } from "@nomicfoundation/ethereumjs-common";
 import { Transaction, TxData } from "@nomicfoundation/ethereumjs-tx";
 import {
@@ -6,10 +7,13 @@ import {
   privateToAddress,
   bigIntToBuffer,
 } from "@nomicfoundation/ethereumjs-util";
-import { VM } from "@nomicfoundation/ethereumjs-vm";
+import { HardhatBlockchain } from "../../../../src/internal/hardhat-network/provider/HardhatBlockchain";
 
+import { VMAdapter } from "../../../../src/internal/hardhat-network/provider/vm/vm-adapter";
 import { MessageTrace } from "../../../../src/internal/hardhat-network/stack-traces/message-trace";
-import { VMTracer } from "../../../../src/internal/hardhat-network/stack-traces/vm-tracer";
+import { defaultHardhatNetworkParams } from "../../../../src/internal/core/config/default-config";
+import { BlockBuilder } from "../../../../src/internal/hardhat-network/provider/vm/block-builder";
+import { createVm } from "../../../../src/internal/hardhat-network/provider/vm/creation";
 
 const abi = require("ethereumjs-abi");
 
@@ -19,16 +23,41 @@ const senderPrivateKey = Buffer.from(
 );
 const senderAddress = privateToAddress(senderPrivateKey);
 
-export async function instantiateVm(): Promise<VM> {
+export async function instantiateVm(): Promise<[VMAdapter, Common]> {
   const account = Account.fromAccountData({ balance: 1e15 });
 
   const common = new Common({ chain: "mainnet", hardfork: "shanghai" });
+  const blockchain = new HardhatBlockchain(common);
+  await blockchain.addBlock(
+    Block.fromBlockData({
+      header: {
+        number: 0n,
+      },
+    })
+  );
 
-  const vm = await VM.create({ activatePrecompiles: true, common });
+  const vm = await createVm(
+    common,
+    blockchain,
+    {
+      automine: true,
+      blockGasLimit: 1_000_000,
+      chainId: 1,
+      genesisAccounts: [],
+      hardfork: "shanghai",
+      minGasPrice: 0n,
+      networkId: 1,
+      mempoolOrder: "priority",
+      coinbase: "0x0000000000000000000000000000000000000000",
+      chains: defaultHardhatNetworkParams.chains,
+      allowBlocksWithSameTimestamp: false,
+    },
+    () => "shanghai"
+  );
 
-  await vm.stateManager.putAccount(new Address(senderAddress), account);
+  await vm.putAccount(new Address(senderAddress), account);
 
-  return vm;
+  return [vm, common];
 }
 
 export function encodeConstructorParams(
@@ -62,7 +91,8 @@ export function encodeCall(
 }
 
 export async function traceTransaction(
-  vm: VM,
+  vm: VMAdapter,
+  common: Common,
   txData: TxData
 ): Promise<MessageTrace> {
   const tx = new Transaction({
@@ -76,26 +106,34 @@ export async function traceTransaction(
 
   const signedTx = tx.sign(senderPrivateKey);
 
-  const getContractCode = vm.stateManager.getContractCode.bind(vm.stateManager);
-
-  const vmTracer = new VMTracer(vm, getContractCode);
-  vmTracer.enableTracing();
-
   try {
-    await vm.runTx({ tx: signedTx });
+    const blockBuilder = new BlockBuilder(vm, common, {
+      parentBlock: Block.fromBlockData(
+        {},
+        {
+          skipConsensusFormatValidation: true,
+        }
+      ),
+      headerData: {
+        gasLimit: 10_000_000n,
+      },
+    });
+    await blockBuilder.startBlock();
+    await blockBuilder.addTransaction(signedTx);
+    await blockBuilder.addRewards([]);
+    await blockBuilder.seal();
 
-    const messageTrace = vmTracer.getLastTopLevelMessageTrace();
-    if (messageTrace === undefined) {
-      const lastError = vmTracer.getLastError();
-      throw lastError ?? new Error("Cannot get last top level message trace");
+    const { trace, error } = vm.getLastTrace();
+    if (trace === undefined) {
+      throw error ?? new Error("Cannot get last top level message trace");
     }
-    return messageTrace;
+    return trace;
   } finally {
-    vmTracer.disableTracing();
+    vm.clearLastError();
   }
 }
 
-async function getNextPendingNonce(vm: VM): Promise<Buffer> {
-  const acc = await vm.stateManager.getAccount(new Address(senderAddress));
+async function getNextPendingNonce(vm: VMAdapter): Promise<Buffer> {
+  const acc = await vm.getAccount(new Address(senderAddress));
   return bigIntToBuffer(acc.nonce);
 }

@@ -1,8 +1,8 @@
+import type { AfterTxEvent, VM } from "@nomicfoundation/ethereumjs-vm";
+import type { EVMResult } from "@nomicfoundation/ethereumjs-evm";
+import type { InterpreterStep } from "@nomicfoundation/ethereumjs-evm/dist/interpreter";
+import type { Message } from "@nomicfoundation/ethereumjs-evm/dist/message";
 import { TypedTransaction } from "@nomicfoundation/ethereumjs-tx";
-import { AfterTxEvent, VM } from "@nomicfoundation/ethereumjs-vm";
-import { EVMResult } from "@nomicfoundation/ethereumjs-evm";
-import { InterpreterStep } from "@nomicfoundation/ethereumjs-evm/dist/interpreter";
-import { Message } from "@nomicfoundation/ethereumjs-evm/dist/message";
 import {
   Address,
   bufferToBigInt,
@@ -315,6 +315,13 @@ export class VMDebugTracer {
   }
 
   private _getMemory(step: InterpreterStep): string[] {
+    // if disableMemory is true, we just return an empty array to
+    // avoid wasting (real) memory, since we are going to discard
+    // this later anyway
+    if (this._config?.disableMemory === true) {
+      return [];
+    }
+
     const memory = Buffer.from(step.memory)
       .toString("hex")
       .match(/.{1,64}/g);
@@ -446,8 +453,16 @@ export class VMDebugTracer {
     } else if (step.opcode.name === "INVALID") {
       const code = await this._getContractCode(step.codeAddress);
 
-      const opcodeHex = code[step.pc].toString(16);
-      op = `opcode 0x${opcodeHex} not defined`;
+      if (code.length > step.pc) {
+        const opcodeHex = code[step.pc].toString(16);
+        op = `opcode 0x${opcodeHex} not defined`;
+      } else {
+        // This can happen if there is an invalid opcode in a constructor.
+        // We don't have an easy way to access the init code from here, so we
+        // don't show the value of the opcode in this case.
+        op = "opcode not defined";
+      }
+
       error = {};
     }
 

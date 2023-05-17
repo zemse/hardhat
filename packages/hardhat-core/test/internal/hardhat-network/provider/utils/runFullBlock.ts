@@ -1,10 +1,5 @@
 import { Block } from "@nomicfoundation/ethereumjs-block";
 import { Common } from "@nomicfoundation/ethereumjs-common";
-import {
-  AfterBlockEvent,
-  RunBlockOpts,
-  VM,
-} from "@nomicfoundation/ethereumjs-vm";
 import { assert } from "chai";
 
 import { defaultHardhatNetworkParams } from "../../../../../src/internal/core/config/default-config";
@@ -12,6 +7,7 @@ import { rpcToBlockData } from "../../../../../src/internal/hardhat-network/prov
 import { makeForkClient } from "../../../../../src/internal/hardhat-network/provider/utils/makeForkClient";
 import { HardhatNode } from "../../../../../src/internal/hardhat-network/provider/node";
 import { ForkedNodeConfig } from "../../../../../src/internal/hardhat-network/provider/node-types";
+import { BlockBuilder } from "../../../../../src/internal/hardhat-network/provider/vm/block-builder";
 import { FORK_TESTS_CACHE_PATH } from "../../helpers/constants";
 
 import { assertEqualBlocks } from "./assertEqualBlocks";
@@ -40,7 +36,7 @@ export async function runFullBlock(
   );
 
   if (rpcBlock === null) {
-    assert.fail();
+    assert.fail(`Block ${blockToRun} doesn't exist`);
   }
 
   const forkedNodeConfig: ForkedNodeConfig = {
@@ -61,6 +57,8 @@ export async function runFullBlock(
 
   const [common, forkedNode] = await HardhatNode.create(forkedNodeConfig);
 
+  const parentBlock = await forkedNode.getLatestBlock();
+
   const block = Block.fromBlockData(
     rpcToBlockData({
       ...rpcBlock,
@@ -76,53 +74,22 @@ export async function runFullBlock(
     }
   );
 
-  forkedNode["_vmTracer"].disableTracing();
+  const vm = forkedNode["_vm"];
 
-  const afterBlockEvent = await runBlockAndGetAfterBlockEvent(
-    forkedNode["_vm"],
-    {
-      block,
-      generate: true,
-      skipBlockValidation: true,
-    }
-  );
+  const blockBuilder = new BlockBuilder(vm, common, {
+    parentBlock,
+    headerData: block.header,
+  });
+  await blockBuilder.startBlock();
 
-  const modifiedBlock = afterBlockEvent.block;
-
-  await forkedNode["_vm"].blockchain.putBlock(modifiedBlock);
-  await forkedNode["_saveBlockAsSuccessfullyRun"](
-    modifiedBlock,
-    afterBlockEvent
-  );
-
-  const newBlock = await forkedNode.getBlockByNumber(blockToRun);
-
-  if (newBlock === undefined) {
-    assert.fail();
+  for (const tx of block.transactions.values()) {
+    await blockBuilder.addTransaction(tx);
   }
 
-  await assertEqualBlocks(newBlock, afterBlockEvent, rpcBlock, forkClient);
-}
+  await blockBuilder.addRewards([]);
+  const newBlock = await blockBuilder.seal();
 
-async function runBlockAndGetAfterBlockEvent(
-  vm: VM,
-  runBlockOpts: RunBlockOpts
-): Promise<AfterBlockEvent> {
-  let results: AfterBlockEvent;
+  const transactionResults = blockBuilder.getTransactionResults();
 
-  function handler(event: AfterBlockEvent) {
-    results = event;
-  }
-
-  try {
-    vm.events.once("afterBlock", handler);
-    await vm.runBlock(runBlockOpts);
-  } finally {
-    // We need this in case `runBlock` throws before emitting the event.
-    // Otherwise we'd be leaking the listener until the next call to runBlock.
-
-    vm.events.removeListener("afterBlock", handler);
-  }
-
-  return results!;
+  await assertEqualBlocks(newBlock, transactionResults, rpcBlock, forkClient);
 }

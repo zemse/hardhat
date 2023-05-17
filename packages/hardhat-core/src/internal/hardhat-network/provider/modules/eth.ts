@@ -474,13 +474,12 @@ export class EthModule {
     blockTag: OptionalRpcNewBlockTag
   ): Promise<string> {
     const blockNumberOrPending = await this._resolveNewBlockTag(blockTag);
-
-    return numberToRpcQuantity(
-      await this._node.getAccountBalance(
-        new Address(address),
-        blockNumberOrPending
-      )
+    const accountBalance = await this._node.getAccountBalance(
+      new Address(address),
+      blockNumberOrPending
     );
+
+    return numberToRpcQuantity(accountBalance);
   }
 
   // eth_getBlockByHash
@@ -1576,7 +1575,7 @@ export class EthModule {
     if (singleTransactionMined) {
       const block = results[0].block;
       const tx = block.transactions[0];
-      const txGasUsed = results[0].blockResult.results[0].totalGasSpent;
+      const txGasUsed = results[0].blockResult.results[0].gasUsed;
       const trace = results[0].traces[0];
       await this._logSingleTransaction(tx, block, txGasUsed, trace);
 
@@ -1602,7 +1601,7 @@ export class EthModule {
         );
 
         const { block, blockResult } = sentTxResult;
-        const gasUsed = blockResult.results[sentTxIndex].totalGasSpent;
+        const gasUsed = blockResult.results[sentTxIndex].gasUsed;
         this._logger.logCurrentlySentTransaction(
           sentTx,
           gasUsed,
